@@ -5,7 +5,7 @@ import aiosqlite
 import random
 import datetime
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = MTUxOTcxMzg3MTc5Mzc1MDEyNg.G4ImKW.npfA3FkZb7Xh7Q2VrxzHzV6HNXXKW_oP0lJD0g
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)

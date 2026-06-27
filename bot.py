@@ -1,23 +1,46 @@
 import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+import aiosqlite
 import random
+import datetime
 
 TOKEN = os.getenv('DISCORD_TOKEN')
-
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+DB = "garden.db"
+
+
 # =========================
-# 🌿 SAMPLE VALUE DATABASE
+# 💾 DATABASE
 # =========================
-values = {
-    "dragon": 1000,
-    "leo": 750,
-    "kitsune": 500,
-    "bunny": 100,
-}
+async def init_db():
+    async with aiosqlite.connect(DB) as db:
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS economy (
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER DEFAULT 0
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            user_id INTEGER,
+            channel_id INTEGER
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS warns (
+            user_id INTEGER,
+            count INTEGER DEFAULT 0
+        )
+        """)
+
+        await db.commit()
 
 
 # =========================
@@ -25,85 +48,73 @@ values = {
 # =========================
 @bot.event
 async def on_ready():
-    print(f"🌿 SenZ Clone Online as {bot.user}")
+    print(f"🌿 Logged in as {bot.user}")
+    await init_db()
     await bot.tree.sync()
+    stats_loop.start()
+    print("✅ FULL SYSTEM ONLINE")
 
 
 # =========================
-# 📊 VALUE COMMAND (LIKE SENZ)
+# 🌱 ONE COMMAND SETUP (FULL SERVER)
 # =========================
-@bot.tree.command(name="value", description="Check item value")
-async def value(interaction: discord.Interaction, item: str):
+@bot.tree.command(name="setup")
+async def setup(interaction: discord.Interaction):
 
-    item = item.lower()
+    guild = interaction.guild
 
-    if item in values:
-        val = values[item]
-        rarity = "Legendary" if val > 800 else "Rare" if val > 300 else "Common"
+    roles = [
+        "👑 Owner", "🛠 Admin", "⚡ Moderator",
+        "🌱 Garden Expert", "⭐ VIP", "🎮 Member", "🤖 Bots"
+    ]
 
-        embed = discord.Embed(
-            title="🌿 Grow a Garden Value Check",
-            description=f"📦 Item: **{item}**\n💰 Value: **{val}**\n⭐ Rarity: **{rarity}**",
-            color=discord.Color.green()
-        )
+    for r in roles:
+        await guild.create_role(name=r)
+
+    categories = {
+        "📢 INFORMATION": ["📜 rules", "📢 announcements", "📢 news"],
+        "🌱 GARDEN": ["📈 stock-predictor", "📈 stock-alerts", "🌱 garden-chat", "💰 trading", "⭐ rare-finds"],
+        "🎫 SUPPORT": ["🎫 tickets", "📋 ticket-logs"],
+        "👥 COMMUNITY": ["💬 general", "😂 memes", "🎮 roblox"],
+        "🚨 ALERTS": ["🚨 alerts"]
+    }
+
+    for cat, channels in categories.items():
+        category = await guild.create_category(cat)
+        for ch in channels:
+            await guild.create_text_channel(ch, category=category)
+
+    await interaction.response.send_message("🌿 FULL SERVER CREATED!")
+
+
+# =========================
+# 📈 STOCK PREDICTOR
+# =========================
+@bot.tree.command(name="predict")
+async def predict(interaction: discord.Interaction, mode: str = "all"):
+
+    items = ["Golden Pumpkin", "Sugar Apple", "Star Carrot", "Moon Mango"]
+
+    def make_item():
+        return random.choice(items)
+
+    if mode == "rare":
+        item = "🌟 " + make_item()
+        chance = "VERY LOW STOCK"
+    elif mode == "all":
+        item = make_item()
+        chance = random.choice(["HIGH", "MEDIUM", "LOW"])
     else:
-        embed = discord.Embed(
-            title="❌ Not Found",
-            description="Item not in database",
-            color=discord.Color.red()
-        )
-
-    await interaction.response.send_message(embed=embed)
-
-
-# =========================
-# ⚖️ TRADE CALCULATOR (SENZ STYLE)
-# =========================
-@bot.tree.command(name="trade", description="Check win/loss trade")
-async def trade(interaction: discord.Interaction, your_item: str, their_item: str):
-
-    your = values.get(your_item.lower(), 0)
-    theirs = values.get(their_item.lower(), 0)
-
-    diff = your - theirs
-
-    if diff > 200:
-        result = "🟢 HUGE WIN"
-    elif diff > 0:
-        result = "🟢 WIN"
-    elif diff == 0:
-        result = "🟡 FAIR"
-    elif diff > -200:
-        result = "🔴 LOSS"
-    else:
-        result = "🔴 HUGE LOSS"
+        item = make_item()
+        chance = "UNKNOWN"
 
     embed = discord.Embed(
-        title="⚖️ Trade Calculator",
+        title="📈 Stock Predictor",
         description=f"""
-📦 You: {your_item} ({your})
-📦 Them: {their_item} ({theirs})
-
-📊 Result: **{result}**
+🌱 Item: {item}
+📊 Chance: {chance}
+🔮 Time: {datetime.datetime.now().strftime("%H:%M")}
 """,
-        color=discord.Color.blurple()
-    )
-
-    await interaction.response.send_message(embed=embed)
-
-
-# =========================
-# 📈 STOCK SYSTEM (SENZ STYLE SIMULATION)
-# =========================
-@bot.tree.command(name="stock", description="Check current stock")
-async def stock(interaction: discord.Interaction):
-
-    items = ["dragon", "leo", "kitsune", "bunny"]
-    current = random.choice(items)
-
-    embed = discord.Embed(
-        title="📈 Grow a Garden Stock",
-        description=f"🌿 Current Stock: **{current.upper()}**",
         color=discord.Color.green()
     )
 
@@ -111,29 +122,121 @@ async def stock(interaction: discord.Interaction):
 
 
 # =========================
-# 🔔 ALERT SYSTEM
+# 🚨 ALERT SYSTEM
 # =========================
-@bot.tree.command(name="alert", description="Set stock alert")
-async def alert(interaction: discord.Interaction, item: str):
+@bot.tree.command(name="alert")
+async def alert(interaction: discord.Interaction, message: str):
 
-    await interaction.response.send_message(
-        f"🔔 Alert set for **{item}** (demo system)"
-    )
+    role = discord.utils.get(interaction.guild.roles, name="⭐ VIP")
+    channel = discord.utils.get(interaction.guild.text_channels, name="🚨 alerts")
+
+    if channel:
+        await channel.send(f"🚨 {role.mention if role else ''} {message}")
+
+    await interaction.response.send_message("Alert sent!")
 
 
 # =========================
-# 📊 HISTORY (FAKE SIMULATION)
+# 💰 ECONOMY
 # =========================
-@bot.tree.command(name="history", description="View item history")
-async def history(interaction: discord.Interaction, item: str):
+@bot.tree.command(name="daily")
+async def daily(interaction: discord.Interaction):
 
-    embed = discord.Embed(
-        title=f"📊 {item} History",
-        description="📉 900 → 950 → 1000 → 1100\n📈 Trend: Rising",
-        color=discord.Color.gold()
-    )
+    reward = random.randint(50, 300)
 
-    await interaction.response.send_message(embed=embed)
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("INSERT OR IGNORE INTO economy VALUES (?, 0)", (interaction.user.id,))
+        await db.execute("UPDATE economy SET balance = balance + ? WHERE user_id=?", (reward, interaction.user.id))
+        await db.commit()
+
+    await interaction.response.send_message(f"🎁 +{reward} coins")
+
+
+@bot.tree.command(name="balance")
+async def balance(interaction: discord.Interaction):
+
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT balance FROM economy WHERE user_id=?", (interaction.user.id,))
+        row = await cur.fetchone()
+
+    bal = row[0] if row else 0
+    await interaction.response.send_message(f"💰 {bal}")
+
+
+# =========================
+# 🎫 TICKET SYSTEM (FULL)
+# =========================
+class TicketView(discord.ui.View):
+
+    @discord.ui.button(label="🎫 Create Ticket", style=discord.ButtonStyle.green)
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+        guild = interaction.guild
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True)
+        }
+
+        channel = await guild.create_text_channel(
+            f"ticket-{interaction.user.name}",
+            overwrites=overwrites
+        )
+
+        await channel.send(
+            "🎫 Support Ticket\n"
+            "Buttons: Close / Claim / Transcript (simulated)"
+        )
+
+        await interaction.response.send_message("Ticket created!", ephemeral=True)
+
+
+@bot.tree.command(name="ticket")
+async def ticket(interaction: discord.Interaction):
+    await interaction.channel.send("🎫 Create a ticket:", view=TicketView())
+    await interaction.response.send_message("Panel sent", ephemeral=True)
+
+
+# =========================
+# 🛡️ MODERATION
+# =========================
+@bot.tree.command(name="ban")
+async def ban(interaction: discord.Interaction, member: discord.Member):
+    await member.ban()
+    await interaction.response.send_message("⛔ banned")
+
+
+@bot.tree.command(name="kick")
+async def kick(interaction: discord.Interaction, member: discord.Member):
+    await member.kick()
+    await interaction.response.send_message("🛡️ kicked")
+
+
+@bot.tree.command(name="timeout")
+async def timeout(interaction: discord.Interaction, member: discord.Member, minutes: int):
+    await member.timeout(discord.utils.utcnow() + datetime.timedelta(minutes=minutes))
+    await interaction.response.send_message("⏳ timed out")
+
+
+@bot.tree.command(name="purge")
+async def purge(interaction: discord.Interaction, amount: int):
+    await interaction.channel.purge(limit=amount)
+    await interaction.response.send_message("🧹 cleared", ephemeral=True)
+
+
+# =========================
+# 📊 SERVER STATS
+# =========================
+@tasks.loop(seconds=60)
+async def stats_loop():
+    for guild in bot.guilds:
+        members = guild.member_count
+
+        channel = discord.utils.get(guild.text_channels, name="📢 announcements")
+
+        if channel:
+            await channel.edit(name=f"📢 Members: {members}")
 
 
 # =========================
